@@ -1,6 +1,69 @@
 # multimodal-image-handler
 
+[中文文档](README_zh.md)
+
 Claude Code plugin that intercepts image inputs and sends them to an external multimodal model for analysis, replacing Claude's built-in image processing with text descriptions from the configured model.
+
+## Installation
+
+### Option 1: Slash command (recommended)
+
+Add the marketplace source and enable the plugin in `~/.claude/settings.json`:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "cc-image-handler": {
+      "source": {
+        "source": "github",
+        "repo": "ysq-2024/cc-image-handler"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "multimodal-image-handler@cc-image-handler": true
+  }
+}
+```
+
+Then reload plugins in Claude Code: `/reload-plugins`
+
+### Option 2: Local directory
+
+For development or local testing, add a `directory` source instead:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "cc-image-handler": {
+      "source": {
+        "source": "directory",
+        "path": "/path/to/multimodal-image-handler"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "multimodal-image-handler@cc-image-handler": true
+  }
+}
+```
+
+### Option 3: One-off test
+
+```bash
+claude --plugin-dir /path/to/multimodal-image-handler
+```
+
+## Prerequisites
+
+```bash
+pip3 install openai anthropic cairosvg Pillow
+```
+
+- `openai`: Required for `"format": "openai"`
+- `anthropic`: Required for `"format": "anthropic"`
+- `cairosvg`: Optional, enables SVG-to-PNG conversion
+- `Pillow`: Optional, enables BMP/TIFF/ICO/AVIF/HEIC conversion to PNG
 
 ## How it works
 
@@ -57,17 +120,6 @@ Config resolution priority (high → low):
 - `timeout`: Request timeout in seconds (default: 60).
 
 See `hooks/scripts/multimodal-config.example.json` for a minimal template.
-
-## Dependencies
-
-```bash
-pip3 install openai anthropic cairosvg Pillow
-```
-
-- `openai`: Required for `"format": "openai"`
-- `anthropic`: Required for `"format": "anthropic"`
-- `cairosvg`: Optional, enables SVG-to-PNG conversion
-- `Pillow`: Optional, enables BMP/TIFF/ICO/AVIF/HEIC conversion to PNG
 
 ## Supported image formats
 
