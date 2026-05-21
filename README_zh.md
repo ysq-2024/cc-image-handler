@@ -108,7 +108,7 @@ pip3 install openai anthropic cairosvg Pillow
 
 配置优先级（高 → 低）：
 1. `~/.claude/multimodal-config.json` — 显式覆盖（任意字段）
-2. Claude Code 环境变量 — `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_MODEL`
+2. `~/.claude/settings.json` env 部分 — `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_MODEL`
 3. 自动检测 — API 格式从 URL 模式推断
 
 **最小配置**（只覆盖需要不同的字段，比如换一个视觉模型）：

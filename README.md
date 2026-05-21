@@ -106,7 +106,7 @@ The plugin **defaults to Claude Code's current model configuration** (the same U
 
 Config resolution priority (high → low):
 1. `~/.claude/multimodal-config.json` — explicit overrides (any field)
-2. Claude Code env vars — `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`
+2. `~/.claude/settings.json` env section — `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`
 3. Auto-detection — API format inferred from URL pattern
 
 **Minimal config** (only override what differs, e.g. use a vision-specific model):
