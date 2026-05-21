@@ -1,5 +1,5 @@
 {
-  "name": "multimodal-image-handler",
+  "name": "cc-image-handler",
   "version": "0.1.0",
   "description": "Intercepts image inputs and sends them to an external multimodal model for analysis, replacing Claude's built-in image processing. Supports OpenAI-compatible and Anthropic API formats, with automatic SVG/format conversion.",
   "author": {

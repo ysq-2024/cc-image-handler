@@ -5,7 +5,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/multimodal_handler.py --event pre_read",
+          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/image_handler.py --event pre_read",
           "timeout": 90,
           "statusMessage": "Analyzing image with multimodal model"
         }
@@ -17,7 +17,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/multimodal_handler.py --event user_prompt",
+          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/image_handler.py --event user_prompt",
           "timeout": 90,
           "statusMessage": "Checking prompt for image references"
         }
@@ -30,7 +30,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/multimodal_handler.py --event post_bash",
+          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/image_handler.py --event post_bash",
           "timeout": 90,
           "statusMessage": "Checking command output for produced images"
         }

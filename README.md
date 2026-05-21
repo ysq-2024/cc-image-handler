@@ -1,4 +1,4 @@
-# multimodal-image-handler
+# cc-image-handler
 
 [中文文档](README_zh.md)
 
@@ -6,7 +6,23 @@ Claude Code plugin that intercepts image inputs and sends them to an external mu
 
 ## Installation
 
-### Option 1: Slash command (recommended)
+### Option 1: CLI command (recommended)
+
+Add the marketplace source and install the plugin:
+
+```bash
+claude plugin marketplace add ysq-2024/cc-image-handler
+claude plugin install cc-image-handler@cc-image-handler
+```
+
+Or install with a specific scope:
+
+```bash
+claude plugin install cc-image-handler@cc-image-handler --scope user   # global (default)
+claude plugin install cc-image-handler@cc-image-handler --scope project  # project-level
+```
+
+### Option 2: Manual setup
 
 Add the marketplace source and enable the plugin in `~/.claude/settings.json`:
 
@@ -21,16 +37,14 @@ Add the marketplace source and enable the plugin in `~/.claude/settings.json`:
     }
   },
   "enabledPlugins": {
-    "multimodal-image-handler@cc-image-handler": true
+    "cc-image-handler@cc-image-handler": true
   }
 }
 ```
 
 Then reload plugins in Claude Code: `/reload-plugins`
 
-### Option 2: Local directory
-
-For development or local testing, add a `directory` source instead:
+### Option 3: Local directory (for development)
 
 ```json
 {
@@ -38,20 +52,20 @@ For development or local testing, add a `directory` source instead:
     "cc-image-handler": {
       "source": {
         "source": "directory",
-        "path": "/path/to/multimodal-image-handler"
+        "path": "/path/to/cc-image-handler"
       }
     }
   },
   "enabledPlugins": {
-    "multimodal-image-handler@cc-image-handler": true
+    "cc-image-handler@cc-image-handler": true
   }
 }
 ```
 
-### Option 3: One-off test
+### Option 4: One-off test
 
 ```bash
-claude --plugin-dir /path/to/multimodal-image-handler
+claude --plugin-dir /path/to/cc-image-handler
 ```
 
 ## Prerequisites
@@ -119,7 +133,7 @@ Config resolution priority (high → low):
 - `prompt`: Custom prompt sent to the model with each image.
 - `timeout`: Request timeout in seconds (default: 60).
 
-See `hooks/scripts/multimodal-config.example.json` for a minimal template.
+See `hooks/scripts/config.example.json` for a minimal template.
 
 ## Supported image formats
 

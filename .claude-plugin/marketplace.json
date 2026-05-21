@@ -2,7 +2,7 @@
   "name": "cc-image-handler",
   "plugins": [
     {
-      "name": "multimodal-image-handler",
+      "name": "cc-image-handler",
       "source": "./",
       "description": "Intercepts image inputs and sends them to an external multimodal model for analysis. Defaults to Claude Code's current model config. Supports OpenAI/Anthropic formats with auto SVG conversion."
     }
