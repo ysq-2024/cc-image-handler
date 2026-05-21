@@ -102,44 +102,31 @@ If the API call fails, Claude falls back to its built-in image processing.
 
 ## Configuration
 
-The plugin **defaults to Claude Code's current model configuration** (the same URL, API key, and model Claude Code is already using). No config file is needed if you want to use the same provider.
+The plugin reads config from `~/.claude/settings.json` env section — the same values Claude Code is already using:
 
-Config resolution priority (high → low):
-1. `~/.claude/multimodal-config.json` — explicit overrides (any field)
-2. `~/.claude/settings.json` env section — `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`
-3. Auto-detection — API format inferred from URL pattern
+- `ANTHROPIC_BASE_URL`: API endpoint URL
+- `ANTHROPIC_API_KEY`: API key
+- `ANTHROPIC_MODEL`: model name
 
-**Minimal config** (only override what differs, e.g. use a vision-specific model):
+API format is auto-detected from the URL:
+- `/compatible-mode` → OpenAI format
+- Otherwise → Anthropic format
+
+**Example settings.json:**
 ```json
 {
-  "model": "qwen-vl-plus"
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    "ANTHROPIC_API_KEY": "YOUR_API_KEY_HERE",
+    "ANTHROPIC_MODEL": "qwen-vl-plus"
+  }
 }
 ```
 
-**Full config** (override everything):
-```json
-{
-  "url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-  "apiKey": "YOUR_API_KEY_HERE",
-  "model": "qwen-vl-plus",
-  "format": "openai",
-  "prompt": "Please describe this image in detail...",
-  "timeout": 60
-}
-```
-
-**Fields:**
-- `url`: API endpoint. Falls back to `ANTHROPIC_BASE_URL`. For OpenAI-compatible providers, the handler strips `/chat/completions` automatically.
-- `apiKey`: API key. Falls back to `ANTHROPIC_AUTH_TOKEN`.
-- `model`: Model name. Falls back to `ANTHROPIC_MODEL`. Use a vision-capable model (e.g. `qwen-vl-plus`, `gpt-4o`).
-- `format`: `"openai"` or `"anthropic"`. Auto-detected from URL: `/compatible-mode` → openai, else → anthropic.
-- `prompt`: Custom prompt sent to the model with each image.
-- `timeout`: Request timeout in seconds (default: 60).
-
-See `hooks/scripts/config.example.json` for a minimal template.
+Use a vision-capable model (e.g. `qwen-vl-plus`, `gpt-4o`) for image analysis.
 
 ## Supported image formats
 
 PNG, JPG, JPEG, GIF, BMP, WebP, SVG, TIFF, ICO, AVIF, HEIC/HEIF
 
-Formats not directly supported by the vision API (SVG, BMP, TIFF, etc.) are automatically converted to PNG before sending.
+Formats not directly supported by the vision API (SVG, BMP, TIFF, etc.) are automatically converted to PNG before sending. If the required converter (cairosvg or Pillow) is unavailable, those formats fall back to Claude's built-in image processing.

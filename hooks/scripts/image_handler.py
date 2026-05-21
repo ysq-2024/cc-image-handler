@@ -7,36 +7,21 @@ context (complete replacement mode).
 
 Uses the official openai / anthropic Python SDKs for API calls.
 
-Config resolution (priority from high to low):
-  1. ~/.claude/multimodal-config.json — explicit overrides
-  2. Claude Code env vars — ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_MODEL
-  3. Auto-detection — format inferred from URL pattern
+Config is read from ~/.claude/settings.json env section:
+  - ANTHROPIC_BASE_URL: API endpoint URL
+  - ANTHROPIC_API_KEY: API key
+  - ANTHROPIC_MODEL: model name
 
-Minimal config example (only override what differs from defaults):
-  ~/.claude/multimodal-config.json:
-  {
-    "model": "qwen-vl-plus"
-  }
-
-Full config example:
-  {
-    "url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-    "apiKey": "YOUR_API_KEY_HERE",
-    "model": "qwen-vl-plus",
-    "format": "openai",
-    "prompt": "Describe this image in detail",
-    "timeout": 60
-  }
+Format is auto-detected from URL (/compatible-mode → openai, else → anthropic).
 
 Supported API formats:
   - "openai": Uses the openai SDK (works with DashScope, vLLM, Ollama, etc.)
   - "anthropic": Uses the anthropic SDK (native Claude format)
-  - auto-detect: inferred from URL (/compatible-mode → openai, else → anthropic)
 
 Usage:
-  python3 multimodal_handler.py --event pre_read       # PreToolUse on Read
-  python3 multimodal_handler.py --event user_prompt    # UserPromptSubmit
-  python3 multimodal_handler.py --event post_bash      # PostToolUse on Bash
+  python3 image_handler.py --event pre_read       # PreToolUse on Read
+  python3 image_handler.py --event user_prompt    # UserPromptSubmit
+  python3 image_handler.py --event post_bash      # PostToolUse on Bash
 """
 
 import sys
@@ -107,7 +92,44 @@ if not CAIROSVG_AVAILABLE:
 if not PILLOW_AVAILABLE:
     sys.stderr.write("image_handler: Pillow unavailable — BMP/TIFF/ICO/AVIF/HEIC conversion disabled\n")
 
-CONFIG_PATH = os.path.expanduser("~/.claude/multimodal-config.json")
+SETTINGS_PATH = os.path.expanduser("~/.claude/settings.json")
+
+
+def load_config():
+    """Read url, apiKey, model from ~/.claude/settings.json env section.
+
+    Env keys: ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY, ANTHROPIC_MODEL
+    Format is auto-detected from URL pattern.
+    """
+    try:
+        with open(SETTINGS_PATH) as f:
+            settings = json.load(f)
+    except FileNotFoundError:
+        sys.stderr.write("image_handler: ~/.claude/settings.json not found\n")
+        return None
+    except Exception as e:
+        sys.stderr.write(f"image_handler: settings read error: {e}\n")
+        return None
+
+    env = settings.get("env", {})
+    url = env.get("ANTHROPIC_BASE_URL", "")
+    api_key = env.get("ANTHROPIC_API_KEY", "")
+    model = env.get("ANTHROPIC_MODEL", "")
+
+    if not url or not api_key:
+        sys.stderr.write("image_handler: missing ANTHROPIC_BASE_URL or ANTHROPIC_API_KEY in settings.json\n")
+        return None
+
+    format = detect_format(url)
+
+    return {
+        "url": url,
+        "apiKey": api_key,
+        "model": model,
+        "format": format,
+        "prompt": DEFAULT_PROMPT,
+        "timeout": 60,
+    }
 
 MEDIA_TYPES = {
     ".png": "image/png",
@@ -146,68 +168,6 @@ def detect_format(url):
 
 
 SETTINGS_PATH = os.path.expanduser("~/.claude/settings.json")
-
-
-def _load_settings_env():
-    """Read url, apiKey, model from ~/.claude/settings.json env section."""
-    try:
-        with open(SETTINGS_PATH) as f:
-            settings = json.load(f)
-        env = settings.get("env", {})
-        return {
-            "url": env.get("ANTHROPIC_BASE_URL", ""),
-            "apiKey": env.get("ANTHROPIC_AUTH_TOKEN", ""),
-            "model": env.get("ANTHROPIC_MODEL", ""),
-        }
-    except FileNotFoundError:
-        pass
-    except Exception as e:
-        sys.stderr.write(f"image_handler: settings read error: {e}\n")
-    return {"url": "", "apiKey": "", "model": ""}
-
-
-def load_config():
-    """Load config: explicit multimodal-config.json overrides settings.json defaults.
-
-    Priority (high → low):
-      1. ~/.claude/multimodal-config.json (explicit overrides per field)
-      2. ~/.claude/settings.json env section (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_MODEL)
-      3. Auto-detected defaults: format inferred from URL, prompt/timeout hard-coded
-    """
-    defaults = _load_settings_env()
-
-    # Try reading explicit config file
-    explicit = {}
-    try:
-        with open(CONFIG_PATH) as f:
-            explicit = json.load(f)
-    except FileNotFoundError:
-        pass
-    except json.JSONDecodeError as e:
-        sys.stderr.write(f"image_handler: config JSON error: {e}\n")
-    except Exception as e:
-        sys.stderr.write(f"image_handler: config read error: {e}\n")
-
-    # Merge: explicit config overrides defaults per field
-    url = explicit.get("url") or defaults["url"]
-    api_key = explicit.get("apiKey") or defaults["apiKey"]
-    model = explicit.get("model") or defaults["model"]
-
-    if not url or not api_key:
-        return None
-
-    format = explicit.get("format") or detect_format(url)
-    prompt = explicit.get("prompt", DEFAULT_PROMPT)
-    timeout = explicit.get("timeout", 60)
-
-    return {
-        "url": url,
-        "apiKey": api_key,
-        "model": model,
-        "format": format,
-        "prompt": prompt,
-        "timeout": timeout,
-    }
 
 
 def is_image_file(path):

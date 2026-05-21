@@ -104,44 +104,31 @@ pip3 install openai anthropic cairosvg Pillow
 
 ## 配置
 
-插件**默认使用 Claude Code 当前的模型配置**（相同的 URL、API key 和模型），无需额外配置。
+插件从 `~/.claude/settings.json` 的 env 部分读取配置，即 Claude Code 当前使用的相同配置：
 
-配置优先级（高 → 低）：
-1. `~/.claude/multimodal-config.json` — 显式覆盖（任意字段）
-2. `~/.claude/settings.json` env 部分 — `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_MODEL`
-3. 自动检测 — API 格式从 URL 模式推断
+- `ANTHROPIC_BASE_URL`：API 端点 URL
+- `ANTHROPIC_API_KEY`：API 密钥
+- `ANTHROPIC_MODEL`：模型名称
 
-**最小配置**（只覆盖需要不同的字段，比如换一个视觉模型）：
+API 格式从 URL 自动检测：
+- 含 `/compatible-mode` → OpenAI 格式
+- 其余 → Anthropic 格式
+
+**settings.json 示例：**
 ```json
 {
-  "model": "qwen-vl-plus"
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    "ANTHROPIC_API_KEY": "YOUR_API_KEY_HERE",
+    "ANTHROPIC_MODEL": "qwen-vl-plus"
+  }
 }
 ```
 
-**完整配置**（覆盖所有字段）：
-```json
-{
-  "url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-  "apiKey": "YOUR_API_KEY_HERE",
-  "model": "qwen-vl-plus",
-  "format": "openai",
-  "prompt": "请详细描述这张图片...",
-  "timeout": 60
-}
-```
-
-**字段说明：**
-- `url`：API 端点。默认取 `ANTHROPIC_BASE_URL`。对于 OpenAI 兼容提供商，自动剥离 `/chat/completions` 后缀。
-- `apiKey`：API 密钥。默认取 `ANTHROPIC_AUTH_TOKEN`。
-- `model`：模型名称。默认取 `ANTHROPIC_MODEL`。请使用支持视觉的模型（如 `qwen-vl-plus`、`gpt-4o`）。
-- `format`：`"openai"` 或 `"anthropic"`。根据 URL 自动检测：含 `/compatible-mode` → openai，其余 → anthropic。
-- `prompt`：随每张图片一起发送给模型的提示词。
-- `timeout`：请求超时秒数（默认 60）。
-
-参考 `hooks/scripts/config.example.json` 中的最小模板。
+请使用支持视觉的模型（如 `qwen-vl-plus`、`gpt-4o`）进行图片分析。
 
 ## 支持的图片格式
 
 PNG、JPG、JPEG、GIF、BMP、WebP、SVG、TIFF、ICO、AVIF、HEIC/HEIF
 
-视觉 API 不直接支持的格式（SVG、BMP、TIFF 等）会在发送前自动转换为 PNG。
+视觉 API 不直接支持的格式（SVG、BMP、TIFF 等）会在发送前自动转换为 PNG。如果所需的转换库（cairosvg 或 Pillow）不可用，这些格式会回退到 Claude 内置的图片处理。
