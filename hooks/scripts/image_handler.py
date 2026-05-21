@@ -145,18 +145,36 @@ def detect_format(url):
     return "anthropic"
 
 
+SETTINGS_PATH = os.path.expanduser("~/.claude/settings.json")
+
+
+def _load_settings_env():
+    """Read url, apiKey, model from ~/.claude/settings.json env section."""
+    try:
+        with open(SETTINGS_PATH) as f:
+            settings = json.load(f)
+        env = settings.get("env", {})
+        return {
+            "url": env.get("ANTHROPIC_BASE_URL", ""),
+            "apiKey": env.get("ANTHROPIC_AUTH_TOKEN", ""),
+            "model": env.get("ANTHROPIC_MODEL", ""),
+        }
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        sys.stderr.write(f"image_handler: settings read error: {e}\n")
+    return {"url": "", "apiKey": "", "model": ""}
+
+
 def load_config():
-    """Load config: explicit multimodal-config.json overrides env var defaults.
+    """Load config: explicit multimodal-config.json overrides settings.json defaults.
 
     Priority (high → low):
       1. ~/.claude/multimodal-config.json (explicit overrides per field)
-      2. Claude Code env vars: ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_MODEL
+      2. ~/.claude/settings.json env section (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_MODEL)
       3. Auto-detected defaults: format inferred from URL, prompt/timeout hard-coded
     """
-    # Claude Code's current model configuration from env vars
-    env_url = os.environ.get("ANTHROPIC_BASE_URL", "")
-    env_api_key = os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
-    env_model = os.environ.get("ANTHROPIC_MODEL", "")
+    defaults = _load_settings_env()
 
     # Try reading explicit config file
     explicit = {}
@@ -166,14 +184,14 @@ def load_config():
     except FileNotFoundError:
         pass
     except json.JSONDecodeError as e:
-        sys.stderr.write(f"multimodal_handler: config JSON error: {e}\n")
+        sys.stderr.write(f"image_handler: config JSON error: {e}\n")
     except Exception as e:
-        sys.stderr.write(f"multimodal_handler: config read error: {e}\n")
+        sys.stderr.write(f"image_handler: config read error: {e}\n")
 
-    # Merge: explicit config overrides env vars per field
-    url = explicit.get("url") or env_url
-    api_key = explicit.get("apiKey") or env_api_key
-    model = explicit.get("model") or env_model
+    # Merge: explicit config overrides defaults per field
+    url = explicit.get("url") or defaults["url"]
+    api_key = explicit.get("apiKey") or defaults["apiKey"]
+    model = explicit.get("model") or defaults["model"]
 
     if not url or not api_key:
         return None
