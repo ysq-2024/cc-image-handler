@@ -76,7 +76,10 @@ pip3 install openai anthropic cairosvg Pillow
 
 - `openai`: Required for `"format": "openai"`
 - `anthropic`: Required for `"format": "anthropic"`
-- `cairosvg`: Optional, enables SVG-to-PNG conversion
+- `cairosvg`: Optional, enables SVG-to-PNG conversion. **Also requires the Cairo system library** — install it first:
+  - Ubuntu/Debian: `sudo apt install libcairo2-dev`
+  - macOS: `brew install cairo`
+  - Alpine: `apk add cairo-dev`
 - `Pillow`: Optional, enables BMP/TIFF/ICO/AVIF/HEIC conversion to PNG
 
 ## How it works
