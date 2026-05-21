@@ -373,12 +373,17 @@ def find_image_paths_in_text(text):
 
     Detects all known image formats regardless of converter availability.
     Filtering by actual support is done later by is_image_file().
+    Supports: absolute (/...), home (~...), relative (../...), and @-references (@file.ext)
     """
     exts = "png|jpg|jpeg|gif|bmp|webp|svg|tiff|tif|ico|avif|heic|heif"
     abs_pattern = r'(?:[/~][\w/\-\.]+\.(?:' + exts + r'))'
     rel_pattern = r'(?:\.{1,2}/[\w/\-\.]+\.(?:' + exts + r'))'
+    ref_pattern = r'(?:@[\w/\-\.]+\.(?:' + exts + r'))'
     paths = re.findall(abs_pattern, text, re.IGNORECASE)
     paths.extend(re.findall(rel_pattern, text, re.IGNORECASE))
+    refs = re.findall(ref_pattern, text, re.IGNORECASE)
+    # Strip leading @ from @-references for file resolution
+    paths.extend(r[1:] for r in refs)
     return list(dict.fromkeys(paths))
 
 
