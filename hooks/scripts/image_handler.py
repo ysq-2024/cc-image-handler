@@ -68,12 +68,44 @@ try:
 except ImportError:
     Image = None
 
-CONFIG_PATH = os.path.expanduser("~/.claude/multimodal-config.json")
 
-IMAGE_EXTENSIONS = frozenset({
-    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp",
-    ".svg", ".tiff", ".tif", ".ico", ".avif", ".heic", ".heif",
-})
+def _check_cairosvg():
+    """Verify cairosvg can actually convert (requires Cairo system library)."""
+    if cairosvg is None:
+        return False
+    try:
+        cairosvg.svg2png(bytestring=b'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>')
+        return True
+    except Exception:
+        return False
+
+
+def _check_pillow():
+    """Verify Pillow can actually convert images."""
+    if Image is None:
+        return False
+    try:
+        img = Image.new("RGB", (1, 1))
+        img.save(tempfile.NamedTemporaryFile(suffix=".png", delete=False).name, format="PNG")
+        return True
+    except Exception:
+        return False
+
+
+CAIROSVG_AVAILABLE = _check_cairosvg()
+PILLOW_AVAILABLE = _check_pillow()
+
+# Dynamically build supported extensions based on available converters.
+DIRECTLY_SUPPORTED = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+CAIROSVG_FORMATS = {".svg"} if CAIROSVG_AVAILABLE else set()
+PILLOW_FORMATS = {".bmp", ".tiff", ".tif", ".ico", ".avif", ".heic", ".heif"} if PILLOW_AVAILABLE else set()
+
+IMAGE_EXTENSIONS = frozenset(DIRECTLY_SUPPORTED | CAIROSVG_FORMATS | PILLOW_FORMATS)
+
+if not CAIROSVG_AVAILABLE:
+    sys.stderr.write("image_handler: cairosvg/Cairo unavailable — SVG conversion disabled\n")
+if not PILLOW_AVAILABLE:
+    sys.stderr.write("image_handler: Pillow unavailable — BMP/TIFF/ICO/AVIF/HEIC conversion disabled\n")
 
 MEDIA_TYPES = {
     ".png": "image/png",
@@ -194,7 +226,9 @@ def prepare_image_for_api(image_path):
         return image_path, get_media_type(image_path), False
 
     # SVG → PNG via cairosvg
-    if ext == ".svg" and cairosvg is not None:
+    if ext == ".svg":
+        if not CAIROSVG_AVAILABLE:
+            raise RuntimeError("SVG conversion unavailable: cairosvg/Cairo library not installed")
         tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
         try:
             cairosvg.svg2png(url=image_path, write_to=tmp.name)
@@ -206,7 +240,9 @@ def prepare_image_for_api(image_path):
             raise
 
     # BMP, TIFF, ICO, AVIF, HEIC → PNG via Pillow
-    if Image is not None:
+    if ext in PILLOW_FORMATS:
+        if not PILLOW_AVAILABLE:
+            raise RuntimeError(f"{ext} conversion unavailable: Pillow not installed")
         tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
         try:
             img = Image.open(image_path)
@@ -349,10 +385,15 @@ def call_multimodal_api(config, image_path):
 
 
 def find_image_paths_in_text(text):
-    """Extract image file paths from text using regex."""
-    pattern = r'(?:[/~][\w/\-\.]+\.(?:png|jpg|jpeg|gif|bmp|webp|svg|tiff|tif|ico|avif|heic|heif))'
+    """Extract image file paths from text using regex.
+
+    Detects all known image formats regardless of converter availability.
+    Filtering by actual support is done later by is_image_file().
+    """
+    exts = "png|jpg|jpeg|gif|bmp|webp|svg|tiff|tif|ico|avif|heic|heif"
+    pattern = rf'(?:[/~][\w/\-\.]+\.(?:{exts}))'
     paths = re.findall(pattern, text, re.IGNORECASE)
-    rel_pattern = r'(?:\.{1,2}/[\w/\-\.]+\.(?:png|jpg|jpeg|gif|bmp|webp|svg|tiff|tif|ico|avif|heic|heif))'
+    rel_pattern = rf'(?:\.{1,2}/[\w/\-\.]+\.(?:{exts}))'
     paths.extend(re.findall(rel_pattern, text, re.IGNORECASE))
     return paths
 
