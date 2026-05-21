@@ -107,6 +107,8 @@ if not CAIROSVG_AVAILABLE:
 if not PILLOW_AVAILABLE:
     sys.stderr.write("image_handler: Pillow unavailable — BMP/TIFF/ICO/AVIF/HEIC conversion disabled\n")
 
+CONFIG_PATH = os.path.expanduser("~/.claude/multimodal-config.json")
+
 MEDIA_TYPES = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -391,11 +393,11 @@ def find_image_paths_in_text(text):
     Filtering by actual support is done later by is_image_file().
     """
     exts = "png|jpg|jpeg|gif|bmp|webp|svg|tiff|tif|ico|avif|heic|heif"
-    pattern = rf'(?:[/~][\w/\-\.]+\.(?:{exts}))'
-    paths = re.findall(pattern, text, re.IGNORECASE)
-    rel_pattern = rf'(?:\.{1,2}/[\w/\-\.]+\.(?:{exts}))'
+    abs_pattern = r'(?:[/~][\w/\-\.]+\.(?:' + exts + r'))'
+    rel_pattern = r'(?:\.{1,2}/[\w/\-\.]+\.(?:' + exts + r'))'
+    paths = re.findall(abs_pattern, text, re.IGNORECASE)
     paths.extend(re.findall(rel_pattern, text, re.IGNORECASE))
-    return paths
+    return list(dict.fromkeys(paths))
 
 
 def resolve_path(p):
