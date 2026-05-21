@@ -120,7 +120,11 @@ def load_config():
         sys.stderr.write("image_handler: missing ANTHROPIC_BASE_URL or ANTHROPIC_API_KEY in settings.json\n")
         return None
 
-    format = detect_format(url)
+    format = "anthropic"
+
+    # Auto-detect: switch to openai if URL contains /compatible-mode
+    if "/compatible-mode" in url or "/v1/chat/completions" in url:
+        format = "openai"
 
     return {
         "url": url,
