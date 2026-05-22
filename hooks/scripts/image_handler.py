@@ -11,6 +11,7 @@ Config is read from ~/.claude/settings.json env section:
   - ANTHROPIC_BASE_URL: API endpoint URL
   - ANTHROPIC_API_KEY: API key
   - ANTHROPIC_MODEL: model name
+  - MULTIMODAL_BASE_URL/MULTIMODAL_API_KEY/MULTIMODAL_MODEL/MULTIMODAL_FORMAT: overrides
 
 Format is auto-detected from URL (/compatible-mode → openai, else → anthropic).
 
@@ -36,16 +37,7 @@ import logging
 
 LOG_PATH = os.path.expanduser("~/.claude/image_handler.log")
 CACHE_PATH = os.path.expanduser("~/.claude/image_handler_cache.json")
-
-
-def log(msg):
-    """Write to log file and stderr for debug."""
-    try:
-        with open(LOG_PATH, "a") as f:
-            f.write(msg + "\n")
-    except Exception:
-        pass
-    sys.stderr.write(msg + "\n")
+SETTINGS_PATH = os.path.expanduser("~/.claude/settings.json")
 
 
 logging.basicConfig(
@@ -59,108 +51,61 @@ try:
     from openai import OpenAI
 except ImportError:
     OpenAI = None
+    logger.warning("openai package not installed")
 
 try:
     import anthropic
 except ImportError:
     anthropic = None
+    logger.warning("anthropic package not installed")
 
 try:
     import cairosvg
-except ImportError:
+except ImportError as e:
     cairosvg = None
+    logger.warning("cairosvg not installed: %s", e)
 
 try:
     from PIL import Image
-except ImportError:
+except ImportError as e:
     Image = None
+    logger.warning("Pillow not installed: %s", e)
 
 
 def _check_cairosvg():
-    """Verify cairosvg can actually convert (requires Cairo system library)."""
     if cairosvg is None:
         return False
     try:
         cairosvg.svg2png(bytestring=b'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>')
         return True
-    except Exception:
+    except Exception as e:
+        logger.warning("cairosvg check failed: %s: %s", type(e).__name__, e)
         return False
 
 
 def _check_pillow():
-    """Verify Pillow can actually convert images."""
     if Image is None:
         return False
     try:
         img = Image.new("RGB", (1, 1))
         img.save(tempfile.NamedTemporaryFile(suffix=".png", delete=False).name, format="PNG")
         return True
-    except Exception:
+    except Exception as e:
+        logger.warning("Pillow check failed: %s: %s", type(e).__name__, e)
         return False
 
 
 CAIROSVG_AVAILABLE = _check_cairosvg()
 PILLOW_AVAILABLE = _check_pillow()
 
-# Dynamically build supported extensions based on available converters.
 DIRECTLY_SUPPORTED = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 CAIROSVG_FORMATS = {".svg"} if CAIROSVG_AVAILABLE else set()
 PILLOW_FORMATS = {".bmp", ".tiff", ".tif", ".ico", ".avif", ".heic", ".heif"} if PILLOW_AVAILABLE else set()
 
 IMAGE_EXTENSIONS = frozenset(DIRECTLY_SUPPORTED | CAIROSVG_FORMATS | PILLOW_FORMATS)
 
-if not CAIROSVG_AVAILABLE:
-    logger.warning("cairosvg/Cairo unavailable — SVG conversion disabled")
-if not PILLOW_AVAILABLE:
-    logger.warning("Pillow unavailable — BMP/TIFF/ICO/AVIF/HEIC conversion disabled")
-
-SETTINGS_PATH = os.path.expanduser("~/.claude/settings.json")
-
-
-def load_config():
-    """Read config from ~/.claude/settings.json env section.
-
-    Base keys: ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY, ANTHROPIC_MODEL
-    Override keys for image analysis: MULTIMODAL_BASE_URL, MULTIMODAL_API_KEY, MULTIMODAL_MODEL, MULTIMODAL_FORMAT
-    Override keys take priority over base keys when set.
-    Format defaults to anthropic, auto-detected from URL if MULTIMODAL_FORMAT not set.
-    """
-    try:
-        with open(SETTINGS_PATH) as f:
-            settings = json.load(f)
-    except FileNotFoundError:
-        logger.error("~/.claude/settings.json not found")
-        return None
-    except Exception as e:
-        logger.error("settings read error: %s", e)
-        return None
-
-    env = settings.get("env", {})
-    url = env.get("MULTIMODAL_BASE_URL", "") or env.get("ANTHROPIC_BASE_URL", "")
-    api_key = env.get("MULTIMODAL_API_KEY", "") or env.get("ANTHROPIC_API_KEY", "")
-    model = env.get("MULTIMODAL_MODEL", "") or env.get("ANTHROPIC_MODEL", "")
-
-    if not url or not api_key:
-        logger.error("missing ANTHROPIC_BASE_URL or ANTHROPIC_API_KEY in settings.json")
-        return None
-
-    # Format: explicit override > auto-detect > default anthropic
-    format = env.get("MULTIMODAL_FORMAT", "")
-    if not format:
-        format = "anthropic"
-        if "/compatible-mode" in url or "/v1/chat/completions" in url:
-            format = "openai"
-
-    logger.info("config: url=%s, model=%s, format=%s", url, model, format)
-
-    return {
-        "url": url,
-        "apiKey": api_key,
-        "model": model,
-        "format": format,
-        "prompt": DEFAULT_PROMPT,
-        "timeout": 60,
-    }
+logger.info("env check: CAIROSVG_AVAILABLE=%s, PILLOW_AVAILABLE=%s, IMAGE_EXTENSIONS=%s",
+            CAIROSVG_AVAILABLE, PILLOW_AVAILABLE, sorted(IMAGE_EXTENSIONS))
 
 MEDIA_TYPES = {
     ".png": "image/png",
@@ -187,18 +132,47 @@ DEFAULT_PROMPT = (
 MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
 
 
-def detect_format(url):
-    """Auto-detect API format from the URL pattern.
+def load_config():
+    """Read config from ~/.claude/settings.json env section."""
+    try:
+        with open(SETTINGS_PATH) as f:
+            settings = json.load(f)
+    except FileNotFoundError:
+        logger.error("~/.claude/settings.json not found")
+        return None
+    except json.JSONDecodeError as e:
+        logger.error("settings.json JSON decode error: %s", e)
+        return None
+    except Exception as e:
+        logger.error("settings read error: %s: %s", type(e).__name__, e)
+        return None
 
-    /compatible-mode or /v1/chat/completions → openai
-    Everything else (e.g. /apps/anthropic) → anthropic
-    """
-    if "/compatible-mode" in url or "/v1/chat/completions" in url:
-        return "openai"
-    return "anthropic"
+    env = settings.get("env", {})
+    url = env.get("MULTIMODAL_BASE_URL", "") or env.get("ANTHROPIC_BASE_URL", "")
+    api_key = env.get("MULTIMODAL_API_KEY", "") or env.get("ANTHROPIC_API_KEY", "")
+    model = env.get("MULTIMODAL_MODEL", "") or env.get("ANTHROPIC_MODEL", "")
 
+    if not url or not api_key:
+        logger.error("missing ANTHROPIC_BASE_URL or ANTHROPIC_API_KEY in settings.json env (url=%s, apiKey=%s)",
+                     url[:50] if url else "", api_key[:10] if api_key else "")
+        return None
 
-SETTINGS_PATH = os.path.expanduser("~/.claude/settings.json")
+    format = env.get("MULTIMODAL_FORMAT", "")
+    if not format:
+        format = "anthropic"
+        if "/compatible-mode" in url or "/v1/chat/completions" in url:
+            format = "openai"
+
+    logger.info("config: url=%s, model=%s, format=%s", url, model, format)
+
+    return {
+        "url": url,
+        "apiKey": api_key,
+        "model": model,
+        "format": format,
+        "prompt": DEFAULT_PROMPT,
+        "timeout": 60,
+    }
 
 
 def is_image_file(path):
@@ -219,24 +193,14 @@ def encode_image(path):
         return base64.b64encode(f.read()).decode("utf-8")
 
 
-# Formats that most vision APIs accept directly.
-DIRECTLY_SUPPORTED = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
-
-
 def prepare_image_for_api(image_path):
-    """Convert image to a format the multimodal API can accept.
-
-    Returns (prepared_path, media_type, is_temp).
-    - prepared_path: file path to send (may be a temp PNG for SVGs etc.)
-    - media_type: MIME type of the prepared file
-    - is_temp: True if prepared_path is a temp file that should be cleaned up
-    """
+    """Convert image to a format the multimodal API can accept."""
     ext = os.path.splitext(image_path)[1].lower()
+    logger.info("prepare_image: path=%s, ext=%s, size=%d", image_path, ext, os.path.getsize(image_path))
 
     if ext in DIRECTLY_SUPPORTED:
         return image_path, get_media_type(image_path), False
 
-    # SVG → PNG via cairosvg
     if ext == ".svg":
         if not CAIROSVG_AVAILABLE:
             raise RuntimeError("SVG conversion unavailable: cairosvg/Cairo library not installed")
@@ -244,13 +208,14 @@ def prepare_image_for_api(image_path):
         try:
             cairosvg.svg2png(url=image_path, write_to=tmp.name)
             tmp.close()
+            logger.info("SVG→PNG conversion success: %s", tmp.name)
             return tmp.name, "image/png", True
-        except Exception:
+        except Exception as e:
             tmp.close()
             os.unlink(tmp.name)
+            logger.error("SVG→PNG conversion failed: %s: %s", type(e).__name__, e)
             raise
 
-    # BMP, TIFF, ICO, AVIF, HEIC → PNG via Pillow
     if ext in PILLOW_FORMATS:
         if not PILLOW_AVAILABLE:
             raise RuntimeError(f"{ext} conversion unavailable: Pillow not installed")
@@ -259,33 +224,30 @@ def prepare_image_for_api(image_path):
             img = Image.open(image_path)
             img.save(tmp.name, format="PNG")
             tmp.close()
+            logger.info("%s→PNG conversion success: %s", ext, tmp.name)
             return tmp.name, "image/png", True
-        except Exception:
+        except Exception as e:
             tmp.close()
             try:
                 os.unlink(tmp.name)
             except OSError:
                 pass
+            logger.error("%s→PNG conversion failed: %s: %s", ext, type(e).__name__, e)
             raise
 
-    # No conversion available — try sending original format anyway
+    logger.warning("no converter for %s, sending original format", ext)
     return image_path, get_media_type(image_path), False
 
 
 def normalize_openai_base_url(url):
-    """Strip /chat/completions suffix so the openai SDK can use it as base_url.
-
-    The SDK appends /chat/completions automatically, so if the user provides
-    the full endpoint URL we need to trim it down to the base.
-    """
     url = url.rstrip("/")
     for suffix in ("/chat/completions", "/v1/chat/completions"):
         if url.endswith(suffix):
             url = url[: -len(suffix)]
             break
-    # Ensure trailing slash — the openai SDK expects base_url to end with /
     if not url.endswith("/"):
         url += "/"
+    logger.info("normalize_openai_base_url: %s", url)
     return url
 
 
@@ -306,37 +268,46 @@ def call_multimodal_api_openai(config, image_path):
     timeout = config.get("timeout", 60)
     base_url = normalize_openai_base_url(config["url"])
 
+    logger.info("openai call: model=%s, base_url=%s, media_type=%s, b64_len=%d",
+                model_name, base_url, media_type, len(image_b64))
+
     client = OpenAI(
         api_key=config["apiKey"],
         base_url=base_url,
         timeout=timeout,
     )
 
-    response = client.chat.completions.create(
-        model=model_name,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:{media_type};base64,{image_b64}",
+    try:
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{media_type};base64,{image_b64}",
+                            },
                         },
-                    },
-                    {"type": "text", "text": prompt_text},
-                ],
-            }
-        ],
-        max_tokens=40960,
-        stream=True,
-    )
+                        {"type": "text", "text": prompt_text},
+                    ],
+                }
+            ],
+            max_tokens=40960,
+            stream=True,
+        )
 
-    chunks = []
-    for chunk in response:
-        if chunk.choices and chunk.choices[0].delta.content:
-            chunks.append(chunk.choices[0].delta.content)
-    return "".join(chunks) or "[No response from model]"
+        chunks = []
+        for chunk in response:
+            if chunk.choices and chunk.choices[0].delta.content:
+                chunks.append(chunk.choices[0].delta.content)
+        result = "".join(chunks) or "[No response from model]"
+        logger.info("openai response len=%d, first 200=%s", len(result), result[:200])
+        return result
+    except Exception as e:
+        logger.error("openai API call failed: %s: %s\nFull traceback:", type(e).__name__, e, exc_info=True)
+        raise
 
 
 def call_multimodal_api_anthropic(config, image_path):
@@ -355,40 +326,48 @@ def call_multimodal_api_anthropic(config, image_path):
     model_name = config.get("model", "claude-sonnet-4-6")
     timeout = config.get("timeout", 60)
 
+    logger.info("anthropic call: model=%s, base_url=%s, media_type=%s, b64_len=%d",
+                model_name, config["url"].rstrip("/"), media_type, len(image_b64))
+
     client = anthropic.Anthropic(
         api_key=config["apiKey"],
         base_url=config["url"].rstrip("/"),
         timeout=timeout,
     )
 
-    with client.messages.stream(
-        model=model_name,
-        max_tokens=40960,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": image_b64,
+    try:
+        with client.messages.stream(
+            model=model_name,
+            max_tokens=40960,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": image_b64,
+                            },
                         },
-                    },
-                    {"type": "text", "text": prompt_text},
-                ],
-            }
-        ],
-    ) as stream:
-        text = stream.get_final_text()
-    return text or "[No text response from model]"
+                        {"type": "text", "text": prompt_text},
+                    ],
+                }
+            ],
+        ) as stream:
+            text = stream.get_final_text()
+        result = text or "[No text response from model]"
+        logger.info("anthropic response len=%d, first 200=%s", len(result), result[:200])
+        return result
+    except Exception as e:
+        logger.error("anthropic API call failed: %s: %s\nFull traceback:", type(e).__name__, e, exc_info=True)
+        raise
 
 
 def call_multimodal_api(config, image_path):
-    """Send an image to the multimodal model and return its description."""
     api_format = config.get("format", "openai")
-
+    logger.info("call_multimodal_api: format=%s, image=%s", api_format, image_path)
     if api_format == "anthropic":
         return call_multimodal_api_anthropic(config, image_path)
     else:
@@ -396,12 +375,6 @@ def call_multimodal_api(config, image_path):
 
 
 def find_image_paths_in_text(text):
-    """Extract image file paths from text using regex.
-
-    Detects all known image formats regardless of converter availability.
-    Filtering by actual support is done later by is_image_file().
-    Supports: absolute (/...), home (~...), relative (../...), and @-references (@file.ext)
-    """
     exts = "png|jpg|jpeg|gif|bmp|webp|svg|tiff|tif|ico|avif|heic|heif"
     abs_pattern = r'(?:[/~][\w/\-\.]+\.(?:' + exts + r'))'
     rel_pattern = r'(?:\.{1,2}/[\w/\-\.]+\.(?:' + exts + r'))'
@@ -409,17 +382,11 @@ def find_image_paths_in_text(text):
     paths = re.findall(abs_pattern, text, re.IGNORECASE)
     paths.extend(re.findall(rel_pattern, text, re.IGNORECASE))
     refs = re.findall(ref_pattern, text, re.IGNORECASE)
-    # Strip leading @ from @-references for file resolution
     paths.extend(r[1:] for r in refs)
     return list(dict.fromkeys(paths))
 
 
 def _get_search_dirs():
-    """Get directories to search for bare filenames.
-
-    Uses PWD env var (set by Claude Code to the user's project dir),
-    then CWD, then home directory.
-    """
     dirs = []
     pwd = os.environ.get("PWD", "")
     if pwd:
@@ -428,42 +395,41 @@ def _get_search_dirs():
     if cwd != pwd:
         dirs.append(cwd)
     dirs.append(os.path.expanduser("~"))
+    logger.debug("search_dirs=%s", dirs)
     return dirs
 
 
 def _load_cache():
-    """Load the analyzed-images cache. Returns dict of {path: {mtime, description}}."""
     try:
         with open(CACHE_PATH) as f:
             return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError as e:
+        logger.warning("cache JSON decode error: %s", e)
         return {}
 
 
 def _save_cache(cache):
-    """Save the analyzed-images cache."""
     try:
         with open(CACHE_PATH, "w") as f:
             json.dump(cache, f)
     except Exception as e:
-        logger.warning("failed to save cache: %s", e)
+        logger.warning("failed to save cache: %s: %s", type(e).__name__, e)
 
 
 def _get_file_mtime(path):
-    """Get file modification time as a comparable string."""
     try:
         return str(os.path.getmtime(path))
-    except OSError:
+    except OSError as e:
+        logger.warning("getmtime failed for %s: %s", path, e)
         return ""
 
 
 def _check_cache(cache, path):
-    """Check if path was already analyzed and file hasn't changed.
-
-    Returns cached description if valid, None otherwise.
-    """
     entry = cache.get(path)
     if not entry:
+        logger.debug("cache miss: %s", path)
         return None
     if _get_file_mtime(path) != entry.get("mtime", ""):
         logger.info("cache invalidated: %s (mtime changed)", path)
@@ -473,43 +439,37 @@ def _check_cache(cache, path):
 
 
 def _update_cache(cache, path, description):
-    """Add or update a cache entry."""
     cache[path] = {
         "mtime": _get_file_mtime(path),
         "description": description,
     }
     _save_cache(cache)
+    logger.debug("cache updated: %s", path)
 
 
 def resolve_path(p, search_dirs=None):
-    """Expand ~ and resolve relative/bare filenames to absolute paths.
-
-    For filenames without a path prefix, search in likely directories
-    since the hook script's CWD may differ from the user's project dir.
-    search_dirs: list of directories to try. Defaults to _get_search_dirs().
-    """
     expanded = os.path.expanduser(p)
     if os.path.isabs(expanded):
+        logger.debug("resolve_path: %s is absolute", expanded)
         return expanded
 
-    # Collect candidate directories for bare/relative filenames
     dirs = list(search_dirs or _get_search_dirs())
-
     for d in dirs:
         candidate = os.path.join(d, expanded)
         if os.path.isfile(candidate):
+            logger.info("resolve_path: found %s in %s", expanded, d)
             return candidate
 
-    # Fallback: resolve relative to first search dir (may not exist)
-    return os.path.join(dirs[0], expanded) if dirs else os.path.abspath(expanded)
+    fallback = os.path.join(dirs[0], expanded) if dirs else os.path.abspath(expanded)
+    logger.warning("resolve_path: %s not found in any search dir, fallback=%s", expanded, fallback)
+    return fallback
 
 
 def handle_pre_read(hook_input):
-    """PreToolUse on Read: intercept image file reads, replace with multimodal description."""
     tool_input = hook_input.get("tool_input", {})
     file_path = tool_input.get("file_path", "")
 
-    logger.info("pre_read: file_path=%s", file_path)
+    logger.info("=== pre_read === file_path=%s", file_path)
 
     if not file_path or not is_image_file(file_path):
         logger.debug("pre_read: not an image, continuing")
@@ -552,7 +512,7 @@ def handle_pre_read(hook_input):
             },
         }
     except Exception as e:
-        logger.error("API call failed: %s", e)
+        logger.error("pre_read: API call failed: %s: %s\nFull traceback:", type(e).__name__, e, exc_info=True)
         return {
             "continue": True,
             "systemMessage": (
@@ -563,7 +523,6 @@ def handle_pre_read(hook_input):
 
 
 def handle_user_prompt(hook_input):
-    """UserPromptSubmit: detect image file references in prompt text."""
     prompt_text = ""
     for key in ("prompt", "message", "content", "user_message", "text"):
         val = hook_input.get(key, "")
@@ -574,7 +533,7 @@ def handle_user_prompt(hook_input):
                 prompt_text = str(val)
             break
 
-    logger.info("user_prompt: text=%s", prompt_text[:200])
+    logger.info("=== user_prompt === text=%s", prompt_text[:300])
 
     if not prompt_text:
         logger.debug("user_prompt: no text, continuing")
@@ -598,8 +557,12 @@ def handle_user_prompt(hook_input):
                     desc = call_multimodal_api(config, resolved)
                     _update_cache(cache, resolved, desc)
                 except Exception as e:
+                    logger.error("user_prompt: analysis failed for %s: %s: %s", resolved, type(e).__name__, e, exc_info=True)
                     desc = f"Analysis failed: {type(e).__name__}: {e}"
             descriptions.append(f"[{resolved}]\n{desc}")
+        else:
+            logger.debug("user_prompt: skipping %s (resolved=%s, exists=%s, is_image=%s)",
+                         p, resolved, os.path.isfile(resolved), is_image_file(resolved) if os.path.isfile(resolved) else "N/A")
 
     if descriptions:
         combined = "\n\n---\n\n".join(descriptions)
@@ -622,7 +585,7 @@ def handle_user_prompt(hook_input):
 
 
 def handle_post_bash(hook_input):
-    """PostToolUse on Bash: detect image files produced by commands."""
+    logger.info("=== post_bash ===")
     config = load_config()
     if not config:
         logger.warning("post_bash: no config, continuing")
@@ -639,9 +602,10 @@ def handle_post_bash(hook_input):
     command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
 
     combined_text = f"{command}\n{output}"
-    logger.info("post_bash: combined_text=%s", combined_text[:200])
+    logger.info("post_bash: combined_text=%s", combined_text[:300])
 
     paths = find_image_paths_in_text(combined_text)
+    logger.info("post_bash: detected paths=%s", paths)
     cache = _load_cache()
     descriptions = []
     for p in paths:
@@ -653,8 +617,11 @@ def handle_post_bash(hook_input):
                     desc = call_multimodal_api(config, resolved)
                     _update_cache(cache, resolved, desc)
                 except Exception as e:
+                    logger.error("post_bash: analysis failed for %s: %s: %s", resolved, type(e).__name__, e, exc_info=True)
                     desc = f"Analysis failed: {type(e).__name__}: {e}"
             descriptions.append(f"[{resolved}]\n{desc}")
+        else:
+            logger.debug("post_bash: skipping %s (resolved=%s)", p, resolved)
 
     if descriptions:
         combined = "\n\n---\n\n".join(descriptions)
@@ -686,12 +653,17 @@ def main():
     )
     args = parser.parse_args()
 
+    logger.info("=== main === event=%s", args.event)
+
     try:
         hook_input = json.load(sys.stdin)
-    except json.JSONDecodeError:
+        logger.info("main: hook_input=%s", json.dumps(hook_input)[:500])
+    except json.JSONDecodeError as e:
+        logger.error("main: JSON decode error: %s", e)
         print(json.dumps({"continue": True}))
         return
-    except Exception:
+    except Exception as e:
+        logger.error("main: stdin read error: %s: %s", type(e).__name__, e)
         print(json.dumps({"continue": True}))
         return
 
@@ -703,11 +675,17 @@ def main():
 
     handler = handlers.get(args.event)
     if not handler:
+        logger.error("main: unknown event %s", args.event)
         print(json.dumps({"continue": True}))
         return
 
-    result = handler(hook_input)
-    print(json.dumps(result))
+    try:
+        result = handler(hook_input)
+        logger.info("main: result=%s", json.dumps(result)[:500])
+        print(json.dumps(result))
+    except Exception as e:
+        logger.error("main: handler exception: %s: %s\nFull traceback:", type(e).__name__, e, exc_info=True)
+        print(json.dumps({"continue": True}))
 
 
 if __name__ == "__main__":
