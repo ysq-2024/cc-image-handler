@@ -33,6 +33,8 @@ import mimetypes
 import argparse
 import tempfile
 import logging
+import signal
+import time
 
 LOG_PATH = os.path.expanduser("~/.claude/image_handler.log")
 CACHE_PATH = os.path.expanduser("~/.claude/image_handler_cache.json")
@@ -45,6 +47,16 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 logger = logging.getLogger("image_handler")
+
+
+def _signal_handler(signum, frame):
+    sig_name = signal.Signals(signum).name if hasattr(signal, "Signals") else str(signum)
+    logger.critical("Process killed by signal %s (PID=%d)", sig_name, os.getpid())
+    sys.exit(128 + signum)
+
+
+signal.signal(signal.SIGTERM, _signal_handler)
+signal.signal(signal.SIGINT, _signal_handler)
 
 try:
     from openai import OpenAI
@@ -156,11 +168,7 @@ def load_config():
                      url[:50] if url else "", api_key[:10] if api_key else "")
         return None
 
-    format = env.get("MULTIMODAL_FORMAT", "")
-    if not format:
-        format = "anthropic"
-        if "/compatible-mode" in url or "/v1/chat/completions" in url:
-            format = "openai"
+    format = env.get("MULTIMODAL_FORMAT", "") or "anthropic"
 
     logger.info("config: url=%s, model=%s, format=%s", url, model, format)
 
@@ -267,8 +275,8 @@ def call_multimodal_api_openai(config, image_path):
     timeout = config.get("timeout", 60)
     base_url = normalize_openai_base_url(config["url"])
 
-    logger.info("openai call: model=%s, base_url=%s, media_type=%s, b64_len=%d",
-                model_name, base_url, media_type, len(image_b64))
+    logger.info("openai call: model=%s, base_url=%s, media_type=%s, b64_len=%d, timeout=%d",
+                model_name, base_url, media_type, len(image_b64), timeout)
 
     client = OpenAI(
         api_key=config["apiKey"],
@@ -277,6 +285,8 @@ def call_multimodal_api_openai(config, image_path):
     )
 
     try:
+        t0 = time.time()
+        logger.info("openai: sending request...")
         response = client.chat.completions.create(
             model=model_name,
             messages=[
@@ -296,16 +306,19 @@ def call_multimodal_api_openai(config, image_path):
             max_tokens=40960,
             stream=True,
         )
+        logger.info("openai: response stream started, elapsed=%.1fs", time.time() - t0)
 
         chunks = []
         for chunk in response:
             if chunk.choices and chunk.choices[0].delta.content:
                 chunks.append(chunk.choices[0].delta.content)
+        logger.info("openai: stream finished, elapsed=%.1fs", time.time() - t0)
         result = "".join(chunks) or "[No response from model]"
         logger.info("openai response len=%d, first 200=%s", len(result), result[:200])
         return result
     except Exception as e:
-        logger.error("openai API call failed: %s: %s\nFull traceback:", type(e).__name__, e, exc_info=True)
+        logger.error("openai API call failed after %.1fs: %s: %s\nFull traceback:",
+                     time.time() - t0, type(e).__name__, e, exc_info=True)
         raise
 
 
@@ -513,11 +526,21 @@ def handle_pre_read(hook_input):
     except Exception as e:
         logger.error("pre_read: API call failed: %s: %s\nFull traceback:", type(e).__name__, e, exc_info=True)
         return {
-            "continue": True,
-            "systemMessage": (
-                f"Multimodal model call failed ({type(e).__name__}: {e}). "
-                f"Falling back to Claude's built-in image processing."
-            ),
+            "continue": False,
+            "stopReason": f"Multimodal model call failed: {type(e).__name__}: {e}",
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "additionalContext": (
+                    f"[Error: Failed to analyze {resolved} with multimodal model.\n"
+                    f"{type(e).__name__}: {e}\n\n"
+                    f"The raw image data was NOT passed to Claude. "
+                    f"Check ~/.claude/image_handler.log for details."
+                ),
+                "permissionDecision": "deny",
+                "permissionDecisionReason": (
+                    f"Multimodal model call failed ({type(e).__name__}: {e})"
+                ),
+            },
         }
 
 

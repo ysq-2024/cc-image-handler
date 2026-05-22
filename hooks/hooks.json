@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/image_handler.py --event pre_read",
-            "timeout": 90,
+            "timeout": 180,
             "statusMessage": "cc-image-handler: 正在用多模态模型分析图片"
           }
         ]
@@ -19,7 +19,7 @@
           {
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/image_handler.py --event user_prompt",
-            "timeout": 90,
+            "timeout": 180,
             "statusMessage": "cc-image-handler: 检查 prompt 中的图片引用"
           }
         ]
