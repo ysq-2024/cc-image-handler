@@ -387,12 +387,44 @@ def find_image_paths_in_text(text):
     return list(dict.fromkeys(paths))
 
 
-def resolve_path(p):
-    """Expand ~ and resolve relative paths to absolute."""
+def _get_search_dirs():
+    """Get directories to search for bare filenames.
+
+    Uses PWD env var (set by Claude Code to the user's project dir),
+    then CWD, then home directory.
+    """
+    dirs = []
+    pwd = os.environ.get("PWD", "")
+    if pwd:
+        dirs.append(pwd)
+    cwd = os.getcwd()
+    if cwd != pwd:
+        dirs.append(cwd)
+    dirs.append(os.path.expanduser("~"))
+    return dirs
+
+
+def resolve_path(p, search_dirs=None):
+    """Expand ~ and resolve relative/bare filenames to absolute paths.
+
+    For filenames without a path prefix, search in likely directories
+    since the hook script's CWD may differ from the user's project dir.
+    search_dirs: list of directories to try. Defaults to _get_search_dirs().
+    """
     expanded = os.path.expanduser(p)
-    if not os.path.isabs(expanded):
-        expanded = os.path.abspath(expanded)
-    return expanded
+    if os.path.isabs(expanded):
+        return expanded
+
+    # Collect candidate directories for bare/relative filenames
+    dirs = list(search_dirs or _get_search_dirs())
+
+    for d in dirs:
+        candidate = os.path.join(d, expanded)
+        if os.path.isfile(candidate):
+            return candidate
+
+    # Fallback: resolve relative to first search dir (may not exist)
+    return os.path.join(dirs[0], expanded) if dirs else os.path.abspath(expanded)
 
 
 def handle_pre_read(hook_input):
