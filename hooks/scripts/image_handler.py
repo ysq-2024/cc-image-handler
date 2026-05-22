@@ -304,14 +304,15 @@ def call_multimodal_api_openai(config, image_path):
                 ],
             }
         ],
-        max_tokens=4096,
+        max_tokens=40960,
+        stream=True,
     )
 
-    choice = response.choices[0]
-    content = choice.message.content
-    if content:
-        return content
-    return "[No response from model]"
+    chunks = []
+    for chunk in response:
+        if chunk.choices and chunk.choices[0].delta.content:
+            chunks.append(chunk.choices[0].delta.content)
+    return "".join(chunks) or "[No response from model]"
 
 
 def call_multimodal_api_anthropic(config, image_path):
@@ -336,9 +337,9 @@ def call_multimodal_api_anthropic(config, image_path):
         timeout=timeout,
     )
 
-    message = client.messages.create(
+    with client.messages.stream(
         model=model_name,
-        max_tokens=4096,
+        max_tokens=40960,
         messages=[
             {
                 "role": "user",
@@ -355,10 +356,9 @@ def call_multimodal_api_anthropic(config, image_path):
                 ],
             }
         ],
-    )
-
-    text_blocks = [b.text for b in message.content if b.type == "text"]
-    return "\n".join(text_blocks) if text_blocks else "[No text response from model]"
+    ) as stream:
+        text = stream.get_final_text()
+    return text or "[No text response from model]"
 
 
 def call_multimodal_api(config, image_path):
