@@ -102,28 +102,48 @@ If the API call fails, Claude falls back to its built-in image processing.
 
 ## Configuration
 
-The plugin reads config from `~/.claude/settings.json` env section — the same values Claude Code is already using:
+The plugin reads config from `~/.claude/settings.json` env section. Base keys are the same values Claude Code is already using. Override keys allow specifying a different model/endpoint specifically for image analysis.
 
-- `ANTHROPIC_BASE_URL`: API endpoint URL
-- `ANTHROPIC_API_KEY`: API key
-- `ANTHROPIC_MODEL`: model name
+| Key | Purpose | Required |
+|-----|---------|----------|
+| `ANTHROPIC_BASE_URL` | API endpoint URL (base) | Yes |
+| `ANTHROPIC_API_KEY` | API key (base) | Yes |
+| `ANTHROPIC_MODEL` | Model name (base) | Yes |
+| `MULTIMODAL_BASE_URL` | Override URL for image analysis | No |
+| `MULTIMODAL_API_KEY` | Override API key for image analysis | No |
+| `MULTIMODAL_MODEL` | Override model for image analysis | No |
+| `MULTIMODAL_FORMAT` | Override API format: `"anthropic"` or `"openai"` | No |
 
-API format is auto-detected from the URL:
-- `/compatible-mode` → OpenAI format
-- Otherwise → Anthropic format
+Override keys take priority over base keys. If your Claude Code model doesn't support vision, set `MULTIMODAL_*` to a vision-capable model.
 
-**Example settings.json:**
+API format defaults to `"anthropic"`. Auto-detect switches to `"openai"` if URL contains `/compatible-mode`. Set `MULTIMODAL_FORMAT` to override.
+
+**Minimal settings.json (same model for Claude Code and image analysis):**
 ```json
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    "ANTHROPIC_BASE_URL": "https://dashscope.aliyuncs.com/apps/anthropic",
     "ANTHROPIC_API_KEY": "YOUR_API_KEY_HERE",
     "ANTHROPIC_MODEL": "qwen-vl-plus"
   }
 }
 ```
 
-Use a vision-capable model (e.g. `qwen-vl-plus`, `gpt-4o`) for image analysis.
+**With multimodal override (Claude Code uses non-vision model, image analysis uses vision model):**
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://dashscope.aliyuncs.com/apps/anthropic",
+    "ANTHROPIC_API_KEY": "YOUR_API_KEY_HERE",
+    "ANTHROPIC_MODEL": "glm-5.1",
+    "MULTIMODAL_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    "MULTIMODAL_MODEL": "qwen-vl-plus",
+    "MULTIMODAL_FORMAT": "openai"
+  }
+}
+```
+
+Use a vision-capable model (e.g. `qwen-vl-plus`, `gpt-4o`) for image analysis. Images are always sent as base64.
 
 ## Supported image formats
 

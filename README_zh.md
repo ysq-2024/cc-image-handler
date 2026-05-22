@@ -104,28 +104,48 @@ pip3 install openai anthropic cairosvg Pillow
 
 ## 配置
 
-插件从 `~/.claude/settings.json` 的 env 部分读取配置，即 Claude Code 当前使用的相同配置：
+插件从 `~/.claude/settings.json` 的 env 部分读取配置。基础变量是 Claude Code 当前使用的值。覆盖变量允许为图片分析单独指定不同的模型/端点。
 
-- `ANTHROPIC_BASE_URL`：API 端点 URL
-- `ANTHROPIC_API_KEY`：API 密钥
-- `ANTHROPIC_MODEL`：模型名称
+| 变量 | 用途 | 必需 |
+|------|------|------|
+| `ANTHROPIC_BASE_URL` | API 端点 URL（基础） | 是 |
+| `ANTHROPIC_API_KEY` | API 密钥（基础） | 是 |
+| `ANTHROPIC_MODEL` | 模型名称（基础） | 是 |
+| `MULTIMODAL_BASE_URL` | 覆盖图片分析的 URL | 否 |
+| `MULTIMODAL_API_KEY` | 覆盖图片分析的 API 密钥 | 否 |
+| `MULTIMODAL_MODEL` | 覆盖图片分析的模型 | 否 |
+| `MULTIMODAL_FORMAT` | 覆盖 API 格式：`"anthropic"` 或 `"openai"` | 否 |
 
-API 格式从 URL 自动检测：
-- 含 `/compatible-mode` → OpenAI 格式
-- 其余 → Anthropic 格式
+覆盖变量优先于基础变量。如果 Claude Code 的模型不支持视觉，设置 `MULTIMODAL_*` 指定一个视觉模型。
 
-**settings.json 示例：**
+API 格式默认 `"anthropic"`。如果 URL 含 `/compatible-mode` 则自动检测为 `"openai"`。设置 `MULTIMODAL_FORMAT` 可强制指定。
+
+**最小配置（Claude Code 和图片分析使用同一模型）：**
 ```json
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    "ANTHROPIC_BASE_URL": "https://dashscope.aliyuncs.com/apps/anthropic",
     "ANTHROPIC_API_KEY": "YOUR_API_KEY_HERE",
     "ANTHROPIC_MODEL": "qwen-vl-plus"
   }
 }
 ```
 
-请使用支持视觉的模型（如 `qwen-vl-plus`、`gpt-4o`）进行图片分析。
+**多模态覆盖配置（Claude Code 用非视觉模型，图片分析用视觉模型）：**
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://dashscope.aliyuncs.com/apps/anthropic",
+    "ANTHROPIC_API_KEY": "YOUR_API_KEY_HERE",
+    "ANTHROPIC_MODEL": "glm-5.1",
+    "MULTIMODAL_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    "MULTIMODAL_MODEL": "qwen-vl-plus",
+    "MULTIMODAL_FORMAT": "openai"
+  }
+}
+```
+
+请使用支持视觉的模型（如 `qwen-vl-plus`、`gpt-4o`）进行图片分析。图片始终以 base64 格式上传。
 
 ## 支持的图片格式
 
