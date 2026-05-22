@@ -32,6 +32,27 @@ import re
 import mimetypes
 import argparse
 import tempfile
+import logging
+
+LOG_PATH = os.path.expanduser("~/.claude/image_handler.log")
+
+
+def log(msg):
+    """Write to log file and stderr for debug."""
+    try:
+        with open(LOG_PATH, "a") as f:
+            f.write(msg + "\n")
+    except Exception:
+        pass
+    sys.stderr.write(msg + "\n")
+
+
+logging.basicConfig(
+    filename=LOG_PATH,
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+logger = logging.getLogger("image_handler")
 
 try:
     from openai import OpenAI
@@ -88,9 +109,9 @@ PILLOW_FORMATS = {".bmp", ".tiff", ".tif", ".ico", ".avif", ".heic", ".heif"} if
 IMAGE_EXTENSIONS = frozenset(DIRECTLY_SUPPORTED | CAIROSVG_FORMATS | PILLOW_FORMATS)
 
 if not CAIROSVG_AVAILABLE:
-    sys.stderr.write("image_handler: cairosvg/Cairo unavailable — SVG conversion disabled\n")
+    logger.warning("cairosvg/Cairo unavailable — SVG conversion disabled")
 if not PILLOW_AVAILABLE:
-    sys.stderr.write("image_handler: Pillow unavailable — BMP/TIFF/ICO/AVIF/HEIC conversion disabled\n")
+    logger.warning("Pillow unavailable — BMP/TIFF/ICO/AVIF/HEIC conversion disabled")
 
 SETTINGS_PATH = os.path.expanduser("~/.claude/settings.json")
 
@@ -107,10 +128,10 @@ def load_config():
         with open(SETTINGS_PATH) as f:
             settings = json.load(f)
     except FileNotFoundError:
-        sys.stderr.write("image_handler: ~/.claude/settings.json not found\n")
+        logger.error("~/.claude/settings.json not found")
         return None
     except Exception as e:
-        sys.stderr.write(f"image_handler: settings read error: {e}\n")
+        logger.error("settings read error: %s", e)
         return None
 
     env = settings.get("env", {})
@@ -119,7 +140,7 @@ def load_config():
     model = env.get("MULTIMODAL_MODEL", "") or env.get("ANTHROPIC_MODEL", "")
 
     if not url or not api_key:
-        sys.stderr.write("image_handler: missing ANTHROPIC_BASE_URL or ANTHROPIC_API_KEY in settings.json\n")
+        logger.error("missing ANTHROPIC_BASE_URL or ANTHROPIC_API_KEY in settings.json")
         return None
 
     # Format: explicit override > auto-detect > default anthropic
@@ -128,6 +149,8 @@ def load_config():
         format = "anthropic"
         if "/compatible-mode" in url or "/v1/chat/completions" in url:
             format = "openai"
+
+    logger.info("config: url=%s, model=%s, format=%s", url, model, format)
 
     return {
         "url": url,
@@ -435,17 +458,23 @@ def handle_pre_read(hook_input):
     tool_input = hook_input.get("tool_input", {})
     file_path = tool_input.get("file_path", "")
 
+    logger.info("pre_read: file_path=%s", file_path)
+
     if not file_path or not is_image_file(file_path):
+        logger.debug("pre_read: not an image, continuing")
         return {"continue": True}
 
     config = load_config()
     if not config:
+        logger.warning("pre_read: no config, continuing")
         return {"continue": True}
 
     resolved = resolve_path(file_path)
     if not os.path.isfile(resolved):
+        logger.warning("pre_read: file not found: %s", resolved)
         return {"continue": True}
 
+    logger.info("pre_read: analyzing %s with model %s", resolved, config.get("model", ""))
     try:
         description = call_multimodal_api(config, resolved)
         model_name = config.get("model", "")
@@ -468,7 +497,7 @@ def handle_pre_read(hook_input):
             },
         }
     except Exception as e:
-        sys.stderr.write(f"multimodal_handler: API call failed: {e}\n")
+        logger.error("API call failed: %s", e)
         return {
             "continue": True,
             "systemMessage": (
@@ -490,14 +519,19 @@ def handle_user_prompt(hook_input):
                 prompt_text = str(val)
             break
 
+    logger.info("user_prompt: text=%s", prompt_text[:200])
+
     if not prompt_text:
+        logger.debug("user_prompt: no text, continuing")
         return {"continue": True}
 
     config = load_config()
     if not config:
+        logger.warning("user_prompt: no config, continuing")
         return {"continue": True}
 
     paths = find_image_paths_in_text(prompt_text)
+    logger.info("user_prompt: detected paths=%s", paths)
     descriptions = []
     for p in paths:
         resolved = resolve_path(p)
@@ -532,6 +566,7 @@ def handle_post_bash(hook_input):
     """PostToolUse on Bash: detect image files produced by commands."""
     config = load_config()
     if not config:
+        logger.warning("post_bash: no config, continuing")
         return {"continue": True}
 
     tool_response = hook_input.get("tool_response", {})
@@ -545,6 +580,7 @@ def handle_post_bash(hook_input):
     command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
 
     combined_text = f"{command}\n{output}"
+    logger.info("post_bash: combined_text=%s", combined_text[:200])
 
     paths = find_image_paths_in_text(combined_text)
     descriptions = []
