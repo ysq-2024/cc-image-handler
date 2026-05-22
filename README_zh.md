@@ -86,13 +86,12 @@ pip3 install openai anthropic cairosvg Pillow
 
 ## 工作原理
 
-三个 hook 在不同环节拦截图片输入：
+两个 hook 在不同环节拦截图片输入：
 
 | Hook | 事件 | 拦截内容 |
 |------|------|----------|
 | PreToolUse/Read | Claude 读取图片文件 | 阻止 Read，注入多模态描述 |
 | UserPromptSubmit | 用户在 prompt 中引用图片路径 | 检测路径，添加分析结果作为上下文 |
-| PostToolUse/Bash | Bash 命令产生了图片文件 | 扫描输出中的路径，添加分析结果 |
 
 拦截图片后的处理流程：
 1. 将不支持的格式（SVG 用 cairosvg，BMP/TIFF 用 Pillow）转为 PNG

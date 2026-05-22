@@ -22,7 +22,6 @@ Supported API formats:
 Usage:
   python3 image_handler.py --event pre_read       # PreToolUse on Read
   python3 image_handler.py --event user_prompt    # UserPromptSubmit
-  python3 image_handler.py --event post_bash      # PostToolUse on Bash
 """
 
 import sys
@@ -584,71 +583,12 @@ def handle_user_prompt(hook_input):
     return {"continue": True}
 
 
-def handle_post_bash(hook_input):
-    logger.info("=== post_bash ===")
-    config = load_config()
-    if not config:
-        logger.warning("post_bash: no config, continuing")
-        return {"continue": True}
-
-    tool_response = hook_input.get("tool_response", {})
-    output = ""
-    if isinstance(tool_response, dict):
-        output = tool_response.get("stdout", "") or tool_response.get("output", "") or ""
-    elif isinstance(tool_response, str):
-        output = tool_response
-
-    tool_input = hook_input.get("tool_input", {})
-    command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
-
-    combined_text = f"{command}\n{output}"
-    logger.info("post_bash: combined_text=%s", combined_text[:300])
-
-    paths = find_image_paths_in_text(combined_text)
-    logger.info("post_bash: detected paths=%s", paths)
-    cache = _load_cache()
-    descriptions = []
-    for p in paths:
-        resolved = resolve_path(p)
-        if os.path.isfile(resolved) and is_image_file(resolved):
-            desc = _check_cache(cache, resolved)
-            if not desc:
-                try:
-                    desc = call_multimodal_api(config, resolved)
-                    _update_cache(cache, resolved, desc)
-                except Exception as e:
-                    logger.error("post_bash: analysis failed for %s: %s: %s", resolved, type(e).__name__, e, exc_info=True)
-                    desc = f"Analysis failed: {type(e).__name__}: {e}"
-            descriptions.append(f"[{resolved}]\n{desc}")
-        else:
-            logger.debug("post_bash: skipping %s (resolved=%s)", p, resolved)
-
-    if descriptions:
-        combined = "\n\n---\n\n".join(descriptions)
-        model_name = config.get("model", "")
-        return {
-            "continue": True,
-            "hookSpecificOutput": {
-                "hookEventName": "PostToolUse",
-                "additionalContext": (
-                    f"[Multimodal Model ({model_name}) Analysis of images produced by command]\n"
-                    f"{combined}\n\n"
-                    f"---\n"
-                    f"Note: These images were analyzed by an external multimodal model. "
-                    f"Only text descriptions are available, not raw image data."
-                ),
-            },
-        }
-
-    return {"continue": True}
-
-
 def main():
     parser = argparse.ArgumentParser(description="Multimodal image handler for Claude Code hooks")
     parser.add_argument(
         "--event",
         required=True,
-        choices=["pre_read", "user_prompt", "post_bash"],
+        choices=["pre_read", "user_prompt"],
         help="Hook event type",
     )
     args = parser.parse_args()
@@ -670,7 +610,6 @@ def main():
     handlers = {
         "pre_read": handle_pre_read,
         "user_prompt": handle_user_prompt,
-        "post_bash": handle_post_bash,
     }
 
     handler = handlers.get(args.event)

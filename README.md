@@ -84,13 +84,12 @@ pip3 install openai anthropic cairosvg Pillow
 
 ## How it works
 
-Three hooks intercept image inputs at different points:
+Two hooks intercept image inputs at different points:
 
 | Hook | Event | What it catches |
 |------|-------|-----------------|
 | PreToolUse/Read | Claude reads an image file | Blocks Read, injects multimodal description |
 | UserPromptSubmit | User references image paths in prompt | Detects paths, adds analysis as context |
-| PostToolUse/Bash | Bash command produces image files | Scans output for paths, adds analysis |
 
 When an image is intercepted, the handler:
 1. Converts unsupported formats (SVG via cairosvg, BMP/TIFF via Pillow) to PNG

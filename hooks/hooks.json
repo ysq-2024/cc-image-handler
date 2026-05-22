@@ -24,19 +24,6 @@
           }
         ]
       }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/image_handler.py --event post_bash",
-            "timeout": 90,
-            "statusMessage": "cc-image-handler: 检查命令输出中的图片文件"
-          }
-        ]
-      }
     ]
   }
 }
