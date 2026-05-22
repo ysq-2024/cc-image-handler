@@ -99,9 +99,9 @@ def load_config():
     """Read config from ~/.claude/settings.json env section.
 
     Base keys: ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY, ANTHROPIC_MODEL
-    Override keys for image analysis: MULTIMODAL_BASE_URL, MULTIMODAL_API_KEY, MULTIMODAL_MODEL
+    Override keys for image analysis: MULTIMODAL_BASE_URL, MULTIMODAL_API_KEY, MULTIMODAL_MODEL, MULTIMODAL_FORMAT
     Override keys take priority over base keys when set.
-    Format is auto-detected from URL pattern.
+    Format defaults to anthropic, auto-detected from URL if MULTIMODAL_FORMAT not set.
     """
     try:
         with open(SETTINGS_PATH) as f:
@@ -122,11 +122,12 @@ def load_config():
         sys.stderr.write("image_handler: missing ANTHROPIC_BASE_URL or ANTHROPIC_API_KEY in settings.json\n")
         return None
 
-    format = "anthropic"
-
-    # Auto-detect: switch to openai if URL contains /compatible-mode
-    if "/compatible-mode" in url or "/v1/chat/completions" in url:
-        format = "openai"
+    # Format: explicit override > auto-detect > default anthropic
+    format = env.get("MULTIMODAL_FORMAT", "")
+    if not format:
+        format = "anthropic"
+        if "/compatible-mode" in url or "/v1/chat/completions" in url:
+            format = "openai"
 
     return {
         "url": url,
