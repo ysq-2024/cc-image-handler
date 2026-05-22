@@ -96,9 +96,11 @@ SETTINGS_PATH = os.path.expanduser("~/.claude/settings.json")
 
 
 def load_config():
-    """Read url, apiKey, model from ~/.claude/settings.json env section.
+    """Read config from ~/.claude/settings.json env section.
 
-    Env keys: ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY, ANTHROPIC_MODEL
+    Base keys: ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY, ANTHROPIC_MODEL
+    Override keys for image analysis: MULTIMODAL_BASE_URL, MULTIMODAL_API_KEY, MULTIMODAL_MODEL
+    Override keys take priority over base keys when set.
     Format is auto-detected from URL pattern.
     """
     try:
@@ -112,9 +114,9 @@ def load_config():
         return None
 
     env = settings.get("env", {})
-    url = env.get("ANTHROPIC_BASE_URL", "")
-    api_key = env.get("ANTHROPIC_API_KEY", "")
-    model = env.get("ANTHROPIC_MODEL", "")
+    url = env.get("MULTIMODAL_BASE_URL", "") or env.get("ANTHROPIC_BASE_URL", "")
+    api_key = env.get("MULTIMODAL_API_KEY", "") or env.get("ANTHROPIC_API_KEY", "")
+    model = env.get("MULTIMODAL_MODEL", "") or env.get("ANTHROPIC_MODEL", "")
 
     if not url or not api_key:
         sys.stderr.write("image_handler: missing ANTHROPIC_BASE_URL or ANTHROPIC_API_KEY in settings.json\n")
