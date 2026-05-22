@@ -35,6 +35,7 @@ import tempfile
 import logging
 
 LOG_PATH = os.path.expanduser("~/.claude/image_handler.log")
+CACHE_PATH = os.path.expanduser("~/.claude/image_handler_cache.json")
 
 
 def log(msg):
@@ -430,6 +431,56 @@ def _get_search_dirs():
     return dirs
 
 
+def _load_cache():
+    """Load the analyzed-images cache. Returns dict of {path: {mtime, description}}."""
+    try:
+        with open(CACHE_PATH) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_cache(cache):
+    """Save the analyzed-images cache."""
+    try:
+        with open(CACHE_PATH, "w") as f:
+            json.dump(cache, f)
+    except Exception as e:
+        logger.warning("failed to save cache: %s", e)
+
+
+def _get_file_mtime(path):
+    """Get file modification time as a comparable string."""
+    try:
+        return str(os.path.getmtime(path))
+    except OSError:
+        return ""
+
+
+def _check_cache(cache, path):
+    """Check if path was already analyzed and file hasn't changed.
+
+    Returns cached description if valid, None otherwise.
+    """
+    entry = cache.get(path)
+    if not entry:
+        return None
+    if _get_file_mtime(path) != entry.get("mtime", ""):
+        logger.info("cache invalidated: %s (mtime changed)", path)
+        return None
+    logger.info("cache hit: %s", path)
+    return entry.get("description")
+
+
+def _update_cache(cache, path, description):
+    """Add or update a cache entry."""
+    cache[path] = {
+        "mtime": _get_file_mtime(path),
+        "description": description,
+    }
+    _save_cache(cache)
+
+
 def resolve_path(p, search_dirs=None):
     """Expand ~ and resolve relative/bare filenames to absolute paths.
 
@@ -476,7 +527,11 @@ def handle_pre_read(hook_input):
 
     logger.info("pre_read: analyzing %s with model %s", resolved, config.get("model", ""))
     try:
-        description = call_multimodal_api(config, resolved)
+        cache = _load_cache()
+        description = _check_cache(cache, resolved)
+        if not description:
+            description = call_multimodal_api(config, resolved)
+            _update_cache(cache, resolved, description)
         model_name = config.get("model", "")
         return {
             "continue": False,
@@ -532,15 +587,19 @@ def handle_user_prompt(hook_input):
 
     paths = find_image_paths_in_text(prompt_text)
     logger.info("user_prompt: detected paths=%s", paths)
+    cache = _load_cache()
     descriptions = []
     for p in paths:
         resolved = resolve_path(p)
         if os.path.isfile(resolved) and is_image_file(resolved):
-            try:
-                desc = call_multimodal_api(config, resolved)
-                descriptions.append(f"[{resolved}]\n{desc}")
-            except Exception as e:
-                descriptions.append(f"[{resolved}]\nAnalysis failed: {type(e).__name__}: {e}")
+            desc = _check_cache(cache, resolved)
+            if not desc:
+                try:
+                    desc = call_multimodal_api(config, resolved)
+                    _update_cache(cache, resolved, desc)
+                except Exception as e:
+                    desc = f"Analysis failed: {type(e).__name__}: {e}"
+            descriptions.append(f"[{resolved}]\n{desc}")
 
     if descriptions:
         combined = "\n\n---\n\n".join(descriptions)
@@ -583,15 +642,19 @@ def handle_post_bash(hook_input):
     logger.info("post_bash: combined_text=%s", combined_text[:200])
 
     paths = find_image_paths_in_text(combined_text)
+    cache = _load_cache()
     descriptions = []
     for p in paths:
         resolved = resolve_path(p)
         if os.path.isfile(resolved) and is_image_file(resolved):
-            try:
-                desc = call_multimodal_api(config, resolved)
-                descriptions.append(f"[{resolved}]\n{desc}")
-            except Exception as e:
-                descriptions.append(f"[{resolved}]\nAnalysis failed: {type(e).__name__}: {e}")
+            desc = _check_cache(cache, resolved)
+            if not desc:
+                try:
+                    desc = call_multimodal_api(config, resolved)
+                    _update_cache(cache, resolved, desc)
+                except Exception as e:
+                    desc = f"Analysis failed: {type(e).__name__}: {e}"
+            descriptions.append(f"[{resolved}]\n{desc}")
 
     if descriptions:
         combined = "\n\n---\n\n".join(descriptions)
