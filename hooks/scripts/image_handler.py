@@ -587,25 +587,12 @@ def handle_user_prompt(hook_input):
                          p, resolved, os.path.isfile(resolved), is_image_file(resolved) if os.path.isfile(resolved) else "N/A")
 
     if descriptions:
-        combined = "\n\n---\n\n".join(descriptions)
-        model_name = config.get("model", "")
-        # Use systemMessage (not additionalContext) because additionalContext injects
-        # a 'user' role message, which some API endpoints reject (consecutive user
-        # messages not allowed). systemMessage injects as a system-level message.
-        analysis_block = (
-            f"[Multimodal Model ({model_name}) Analysis of referenced images]\n"
-            f"{combined}\n\n"
-            f"---\n"
-            f"Note: These images were analyzed by an external multimodal model. "
-            f"Only text descriptions are available, not raw image data."
-        )
-        return {
-            "continue": True,
-            "hookSpecificOutput": {
-                "hookEventName": "UserPromptSubmit",
-                "systemMessage": analysis_block,
-            },
-        }
+        # Both additionalContext and systemMessage inject as 'user' role messages
+        # in UserPromptSubmit, causing consecutive user messages that some API
+        # endpoints reject. Only cache the analysis here — PreToolUse will use
+        # the cached description when it intercepts the Read tool.
+        logger.info("user_prompt: cached %d image description(s), not injecting into prompt",
+                     len(descriptions))
 
     return {"continue": True}
 
