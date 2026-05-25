@@ -589,17 +589,21 @@ def handle_user_prompt(hook_input):
     if descriptions:
         combined = "\n\n---\n\n".join(descriptions)
         model_name = config.get("model", "")
+        # Use systemMessage (not additionalContext) because additionalContext injects
+        # a 'user' role message, which some API endpoints reject (consecutive user
+        # messages not allowed). systemMessage injects as a system-level message.
+        analysis_block = (
+            f"[Multimodal Model ({model_name}) Analysis of referenced images]\n"
+            f"{combined}\n\n"
+            f"---\n"
+            f"Note: These images were analyzed by an external multimodal model. "
+            f"Only text descriptions are available, not raw image data."
+        )
         return {
             "continue": True,
             "hookSpecificOutput": {
                 "hookEventName": "UserPromptSubmit",
-                "additionalContext": (
-                    f"[Multimodal Model ({model_name}) Analysis of referenced images]\n"
-                    f"{combined}\n\n"
-                    f"---\n"
-                    f"Note: These images were analyzed by an external multimodal model. "
-                    f"Only text descriptions are available, not raw image data."
-                ),
+                "systemMessage": analysis_block,
             },
         }
 
