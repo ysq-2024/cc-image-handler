@@ -35,6 +35,7 @@ import tempfile
 import logging
 import signal
 import time
+import platform as _platform
 
 LOG_PATH = os.path.expanduser("~/.claude/image_handler.log")
 CACHE_PATH = os.path.expanduser("~/.claude/image_handler_cache.json")
@@ -49,13 +50,84 @@ logging.basicConfig(
 logger = logging.getLogger("image_handler")
 
 
+class Platform:
+    """Centralizes OS detection and platform-specific behavior."""
+
+    IS_WINDOWS = os.name == "nt"
+    IS_POSIX = os.name == "posix"
+    IS_MACOS = _platform.system() == "Darwin"
+    IS_LINUX = _platform.system() == "Linux"
+    SYSTEM = _platform.system()
+
+    # Signal handling: SIGTERM does not exist on Windows
+    HAS_SIGTERM = hasattr(signal, "SIGTERM")
+
+    # Path separator: \\ on Windows, / on POSIX
+    SEP = os.sep
+    ALT_SEP = "/" if IS_WINDOWS else None
+
+    # Path case sensitivity: Windows is case-insensitive
+    CASE_INSENSITIVE_FS = IS_WINDOWS
+
+    # CWD env var: PWD on POSIX, CD on Windows
+    CWD_ENV_VARS = ("PWD", "CD") if IS_WINDOWS else ("PWD",)
+
+    # Regex pattern for path separators in user text (both / and \)
+    PATH_SEP_RE = r"[\\/]"
+
+    # Regex pattern for absolute path prefixes:
+    #   POSIX: / or ~
+    #   Windows: / or ~ or drive letter like C:
+    ABS_PATH_PREFIX_RE = r"(?:[/~]|[A-Za-z]:)" if IS_WINDOWS else r"[/~]"
+
+    # Home directory shorthand display
+    HOME_DISPLAY = "%USERPROFILE%" if IS_WINDOWS else "~"
+
+    @classmethod
+    def normalize_cache_key(cls, path):
+        """Normalize a path for use as a cache key.
+        On Windows (case-insensitive FS), lowercase the path.
+        On POSIX (case-sensitive FS), keep case as-is."""
+        normalized = os.path.normpath(path)
+        if cls.CASE_INSENSITIVE_FS:
+            normalized = normalized.lower()
+        return normalized
+
+    @classmethod
+    def cwd_env(cls):
+        """Return the current working directory from environment variables."""
+        for var in cls.CWD_ENV_VARS:
+            val = os.environ.get(var, "")
+            if val:
+                return val
+        return ""
+
+    @classmethod
+    def info(cls):
+        return {
+            "system": cls.SYSTEM,
+            "os_name": os.name,
+            "is_windows": cls.IS_WINDOWS,
+            "is_posix": cls.IS_POSIX,
+            "is_macos": cls.IS_MACOS,
+            "is_linux": cls.IS_LINUX,
+            "has_sigterm": cls.HAS_SIGTERM,
+            "case_insensitive_fs": cls.CASE_INSENSITIVE_FS,
+            "sep": cls.SEP,
+        }
+
+
+logger.info("platform detection: %s", Platform.info())
+
+
 def _signal_handler(signum, frame):
     sig_name = signal.Signals(signum).name if hasattr(signal, "Signals") else str(signum)
     logger.critical("Process killed by signal %s (PID=%d)", sig_name, os.getpid())
     sys.exit(128 + signum)
 
 
-signal.signal(signal.SIGTERM, _signal_handler)
+if Platform.HAS_SIGTERM:
+    signal.signal(signal.SIGTERM, _signal_handler)
 signal.signal(signal.SIGINT, _signal_handler)
 
 try:
@@ -388,19 +460,32 @@ def call_multimodal_api(config, image_path):
 
 def find_image_paths_in_text(text):
     exts = "png|jpg|jpeg|gif|bmp|webp|svg|tiff|tif|ico|avif|heic|heif"
-    abs_pattern = r'(?:[/~][\w/\-\.]+\.(?:' + exts + r'))'
-    rel_pattern = r'(?:\.{1,2}/[\w/\-\.]+\.(?:' + exts + r'))'
-    ref_pattern = r'(?:@[\w/\-\.]+\.(?:' + exts + r'))'
-    paths = re.findall(abs_pattern, text, re.IGNORECASE)
-    paths.extend(re.findall(rel_pattern, text, re.IGNORECASE))
+    sep = Platform.PATH_SEP_RE
+    abs_prefix = Platform.ABS_PATH_PREFIX_RE
+    # Absolute paths must start at a word boundary — prevents matching
+    # a / that is part of a relative path like ../images/logo.png
+    abs_pattern = r'(?<!\w)(?:' + abs_prefix + r'[\w/\\\-\.]+\.(?:' + exts + r'))'
+    rel_pattern = r'(?:\.{1,2}' + sep + r'[\w/\\\-\.]+\.(?:' + exts + r'))'
+    ref_pattern = r'(?:@[\w/\\\-\.]+\.(?:' + exts + r'))'
+    abs_paths = re.findall(abs_pattern, text, re.IGNORECASE)
+    rel_paths = re.findall(rel_pattern, text, re.IGNORECASE)
     refs = re.findall(ref_pattern, text, re.IGNORECASE)
-    paths.extend(r[1:] for r in refs)
-    return list(dict.fromkeys(paths))
+    # Deduplicate: if a longer match contains a shorter one, keep the longer
+    all_paths = abs_paths + rel_paths + [r[1:] for r in refs]
+    all_paths.sort(key=len, reverse=True)
+    final = []
+    for p in all_paths:
+        normed = os.path.normpath(p)
+        if normed not in final:
+            # Skip if this is a substring of an already-accepted path
+            if not any(normed in f for f in final):
+                final.append(normed)
+    return final
 
 
 def _get_search_dirs():
     dirs = []
-    pwd = os.environ.get("PWD", "")
+    pwd = Platform.cwd_env()
     if pwd:
         dirs.append(pwd)
     cwd = os.getcwd()
@@ -438,41 +523,50 @@ def _get_file_mtime(path):
         return ""
 
 
+def _normalize_cache_key(path):
+    """Normalize a path for use as a cache key.
+    Delegates to Platform.normalize_cache_key which lowercases on
+    Windows (case-insensitive FS) and normpaths on all platforms."""
+    return Platform.normalize_cache_key(path)
+
+
 def _check_cache(cache, path):
-    entry = cache.get(path)
+    key = _normalize_cache_key(path)
+    entry = cache.get(key)
     if not entry:
-        logger.debug("cache miss: %s", path)
+        logger.debug("cache miss: %s (key=%s)", path, key)
         return None
     if _get_file_mtime(path) != entry.get("mtime", ""):
         logger.info("cache invalidated: %s (mtime changed)", path)
         return None
-    logger.info("cache hit: %s", path)
+    logger.info("cache hit: %s (key=%s)", path, key)
     return entry.get("description")
 
 
 def _update_cache(cache, path, description):
-    cache[path] = {
+    key = _normalize_cache_key(path)
+    cache[key] = {
         "mtime": _get_file_mtime(path),
         "description": description,
     }
     _save_cache(cache)
-    logger.debug("cache updated: %s", path)
+    logger.debug("cache updated: %s (key=%s)", path, key)
 
 
 def resolve_path(p, search_dirs=None):
     expanded = os.path.expanduser(p)
     if os.path.isabs(expanded):
         logger.debug("resolve_path: %s is absolute", expanded)
-        return expanded
+        return os.path.normpath(expanded)
 
     dirs = list(search_dirs or _get_search_dirs())
     for d in dirs:
-        candidate = os.path.join(d, expanded)
+        candidate = os.path.normpath(os.path.join(d, expanded))
         if os.path.isfile(candidate):
             logger.info("resolve_path: found %s in %s", expanded, d)
             return candidate
 
-    fallback = os.path.join(dirs[0], expanded) if dirs else os.path.abspath(expanded)
+    fallback = os.path.normpath(os.path.join(dirs[0], expanded)) if dirs else os.path.abspath(expanded)
     logger.warning("resolve_path: %s not found in any search dir, fallback=%s", expanded, fallback)
     return fallback
 
@@ -534,7 +628,7 @@ def handle_pre_read(hook_input):
                     f"[Error: Failed to analyze {resolved} with multimodal model.\n"
                     f"{type(e).__name__}: {e}\n\n"
                     f"The raw image data was NOT passed to Claude. "
-                    f"Check ~/.claude/image_handler.log for details."
+                    f"Check {Platform.HOME_DISPLAY}/.claude/image_handler.log for details."
                 ),
                 "permissionDecision": "deny",
                 "permissionDecisionReason": (

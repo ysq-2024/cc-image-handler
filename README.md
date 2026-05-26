@@ -149,3 +149,18 @@ Use a vision-capable model (e.g. `qwen-vl-plus`, `gpt-4o`) for image analysis. I
 PNG, JPG, JPEG, GIF, BMP, WebP, SVG, TIFF, ICO, AVIF, HEIC/HEIF
 
 Formats not directly supported by the vision API (SVG, BMP, TIFF, etc.) are automatically converted to PNG before sending. If the required converter (cairosvg or Pillow) is unavailable, those formats fall back to Claude's built-in image processing.
+
+## Cross-platform support
+
+The plugin runs on Linux, macOS, and Windows with automatic platform detection:
+
+- **Path handling**: All file paths are normalized via `os.path.normpath()`, collapsing `..` and `.` components to prevent cache misses (e.g. `/mnt/workspace/../test.jpg` → `/mnt/test.jpg`)
+- **Cache key normalization**: On Windows (case-insensitive filesystem), cache keys are lowercased so `C:\Users\Test\photo.png` and `c:\users\test\photo.png` share one entry. On POSIX, case is preserved.
+- **Path detection in prompts**: Both `/` and `\` separators are recognized. Windows drive-letter paths (`C:\...`, `D:/...`) are matched on Windows; POSIX paths (`/home/...`, `~/...`) are matched on Linux/macOS.
+- **Signal handling**: SIGTERM handler is registered only where available (POSIX); skipped on Windows to avoid crashes.
+- **Environment variables**: On Windows, the `CD` env var is checked as a fallback when `PWD` is absent.
+- **Cairo installation** (for SVG support):
+  - Ubuntu/Debian: `sudo apt install libcairo2-dev`
+  - macOS: `brew install cairo`
+  - Alpine: `apk add cairo-dev`
+  - Windows: `pip install cairosvg` plus installing the GTK runtime (see [cairosvg docs](https://cairosvg.org/))
